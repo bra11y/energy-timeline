@@ -1,4 +1,4 @@
-// Provided sample data structure
+// Base data structures from API/props
 export interface EnergyPoint {
   id: number;
   time: string; // ISO string format
@@ -6,9 +6,9 @@ export interface EnergyPoint {
 }
 
 export interface EnergyHighlight {
-  time: string;
+  time: string; // ISO string format
   label: string;
-  color: string;
+  color: string; // Hex color
 }
 
 export interface TimelineMessage {
@@ -16,26 +16,78 @@ export interface TimelineMessage {
   description: string;
 }
 
-// Internal data structure after transformation
-export interface EnergyDataPoint {
+// Internal processed data structures
+export interface ProcessedEnergyPoint {
   time: Date;
-  energyLevel: number;
+  energyLevel: number; // Clamped 0-1
 }
 
+export interface TimeMarker {
+  time: Date;
+  isHour: boolean;
+  label: string | null;
+}
+
+export interface BackgroundSection {
+  start: number; // Hour (0-23)
+  end: number; // Hour (0-24)
+  label: string;
+}
+
+export interface GradientStop {
+  offset: string; // Percentage string like "50%"
+  color: string; // Hex color
+}
+
+// Component props
 export interface EnergyTimelineProps {
   data: EnergyPoint[];
   highlights?: EnergyHighlight[];
-  currentTime?: string;
+  currentTime?: string; // ISO string
   customMessage?: TimelineMessage;
   hourHeight?: number;
   width?: number;
   className?: string;
 }
 
+// Hook return types
+export interface UseEnergyDataReturn {
+  transformedData: ProcessedEnergyPoint[];
+  gradientStops: GradientStop[];
+  currentEnergyLevel: number;
+}
+
+export interface UseTimelineScalesReturn {
+  timeScale: d3.ScaleTime<number, number>;
+  energyScale: d3.ScaleLinear<number, number>;
+  lineGenerator: d3.Line<ProcessedEnergyPoint>;
+  pathData: string | null;
+}
+
+export interface UseTimelineInteractionsReturn {
+  zoomLevel: number;
+  selectedDate: Date;
+  showCalendar: boolean;
+  showTooltip: boolean;
+  handleZoomIn: () => void;
+  handleZoomOut: () => void;
+  handleDateChange: (date: Date) => void;
+  setShowCalendar: (show: boolean) => void;
+  setShowTooltip: (show: boolean) => void;
+}
+
+// Utility types
 export type EnergyLevel = 'high' | 'medium' | 'low';
 
-export const ENERGY_COLORS = {
-  high: '#256EFF',
-  medium: '#DC8F69', 
-  low: '#B7148E'
-} as const;
+export interface TimelineLayout {
+  totalHeight: number;
+  chartWidth: number;
+  currentTimePosition: number;
+  timeMarkers: TimeMarker[];
+  backgroundSections: BackgroundSection[];
+}
+
+// D3 types (re-exported for convenience)
+export type D3ScaleTime = d3.ScaleTime<number, number>;
+export type D3ScaleLinear = d3.ScaleLinear<number, number>;
+export type D3Line<T> = d3.Line<T>;

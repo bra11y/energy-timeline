@@ -1,161 +1,69 @@
-import React, { useMemo, useRef, useState, useCallback } from 'react';
-import * as d3 from 'd3';
+import React from 'react';
+import { TIMELINE_CONSTANTS } from '../../constants/timeline';
+import { useEnergyData } from '../../hooks/useEnergyData';
+import { useTimelineScales } from '../../hooks/useTimelineScales';
+import { useTimelineInteractions } from '../../hooks/useTimelineInteractions';
+import { 
+  calculateTimelineLayout,
+  getGridLineStyles,
+  getTickLength,
+  calculateSectionDimensions,
+  calculateHighlightPosition,
+  getBackgroundColor
+} from '../../utils/timelineHelpers';
+import { createEnergyGradient, createGlowFilter } from '../../utils/d3Helpers';
 import type { EnergyTimelineProps } from '../../types/energy';
-import { formatTime, getEnergyColor, transformEnergyData } from '../../utils/timeUtils';
 
 export const EnergyTimeline: React.FC<EnergyTimelineProps> = ({
   data,
   highlights = [],
   currentTime,
   customMessage,
-  hourHeight: propHourHeight = 40,
-  width = 1240,
+  hourHeight: propHourHeight = TIMELINE_CONSTANTS.HOUR_HEIGHT,
+  width = TIMELINE_CONSTANTS.DEFAULT_WIDTH,
   className = ''
 }) => {
-  const svgRef = useRef<SVGSVGElement>(null);
-  const [zoomLevel, setZoomLevel] = useState(1);
-  const [selectedDate, setSelectedDate] = useState(currentTime ? new Date(currentTime) : new Date());
-  const [showCalendar, setShowCalendar] = useState(false);
-  const [showTooltip, setShowTooltip] = useState(false); // Add tooltip state
+  // Use custom hooks for clean separation of concerns
+  const interactions = useTimelineInteractions(currentTime);
+  const hourHeight = propHourHeight * interactions.zoomLevel;
   
-  const hourHeight = propHourHeight * zoomLevel;
+  const energyData = useEnergyData(data, interactions.selectedDate, currentTime);
   
-  const handleZoomIn = useCallback(() => {
-    setZoomLevel(prev => Math.min(prev * 1.2, 3));
-  }, []);
-  
-  const handleZoomOut = useCallback(() => {
-    setZoomLevel(prev => Math.max(prev / 1.2, 0.5));
-  }, []);
-  
-  const handleDateChange = useCallback((date: Date) => {
-    setSelectedDate(date);
-    setShowCalendar(false);
-  }, []);
-
-  const transformedData = useMemo(() => 
-    transformEnergyData(data, selectedDate), 
-    [data, selectedDate]
-  );
-  
-  const totalHeight = 24 * hourHeight;
-  const margin = { top: 40, right: 200, bottom: 40, left: 80 };
-  const chartWidth = width - margin.left - margin.right;
-  
-  // Current time calculation
-  const currentTimeDate = useMemo(() => {
+  const currentTimeDate = React.useMemo(() => {
     if (currentTime) {
       const baseTime = new Date(currentTime);
-      const currentHour = baseTime.getHours();
-      const currentMinute = baseTime.getMinutes();
-      
-      const resultTime = new Date(selectedDate);
-      resultTime.setHours(currentHour, currentMinute, 0, 0);
+      const resultTime = new Date(interactions.selectedDate);
+      resultTime.setHours(
+        baseTime.getHours(),
+        baseTime.getMinutes(),
+        baseTime.getSeconds(),
+        baseTime.getMilliseconds()
+      );
       return resultTime;
     }
     
-    const defaultTime = new Date(selectedDate);
+    const defaultTime = new Date(interactions.selectedDate);
     defaultTime.setHours(10, 0, 0, 0);
     return defaultTime;
-  }, [currentTime, selectedDate]);
+  }, [currentTime, interactions.selectedDate]);
   
-  // Time scale - maps time to Y position
-  const timeScale = useMemo(() => {
-    const startTime = new Date(currentTimeDate);
-    startTime.setHours(0, 0, 0, 0);
-    const endTime = new Date(startTime);
-    endTime.setHours(23, 59, 59, 999);
-    
-    return d3.scaleTime()
-      .domain([startTime, endTime])
-      .range([margin.top, totalHeight + margin.top]);
-  }, [currentTimeDate, totalHeight, margin.top]);
+  const scales = useTimelineScales(
+    width, 
+    hourHeight, 
+    currentTimeDate, 
+    energyData.transformedData
+  );
   
-  // Energy scale - maps energy level to X position
-  const energyScale = useMemo(() => {
-    return d3.scaleLinear()
-      .domain([0, 1])
-      .range([margin.left + 30, margin.left + chartWidth * 0.7]); // Reduced range to prevent loops
-  }, [margin.left, chartWidth]);
-  
-  // Line generator - simple, follows the data closely without loops
-  const lineGenerator = useMemo(() => {
-    return d3.line<{ time: Date; energyLevel: number }>()
-      .x(d => energyScale(d.energyLevel))
-      .y(d => timeScale(d.time))
-      .curve(d3.curveCatmullRom.alpha(0.5)); // Moderate smoothing to prevent loops
-  }, [energyScale, timeScale]);
-  
-  // Generate time markers (hours and half-hours)
-  const timeMarkers = useMemo(() => {
-    const markers = [];
-    for (let hour = 0; hour < 24; hour++) {
-      // Add hour marker
-      const hourTime = new Date(currentTimeDate);
-      hourTime.setHours(hour, 0, 0, 0);
-      markers.push({
-        time: hourTime,
-        isHour: true,
-        label: formatTime(hourTime)
-      });
-      
-      // Add 30-minute marker
-      const halfHourTime = new Date(currentTimeDate);
-      halfHourTime.setHours(hour, 30, 0, 0);
-      markers.push({
-        time: halfHourTime,
-        isHour: false,
-        label: null
-      });
-    }
-    return markers;
-  }, [currentTimeDate]);
-  
-  const currentTimePosition = useMemo(() => {
-    return timeScale(currentTimeDate);
-  }, [timeScale, currentTimeDate]);
-  
-  // Create gradient stops based on the data
-  const gradientStops = useMemo(() => {
-    return transformedData.map((point, index) => ({
-      offset: `${(index / (transformedData.length - 1)) * 100}%`,
-      color: getEnergyColor(point.energyLevel)
-    }));
-  }, [transformedData]);
+  const layout = calculateTimelineLayout(
+    width,
+    hourHeight,
+    currentTimeDate,
+    scales.timeScale
+  );
 
-  const pathData = useMemo(() => {
-    return lineGenerator(transformedData);
-  }, [lineGenerator, transformedData]);
-  
-  // Background sections with subtle colors
-  const backgroundSections = useMemo(() => [
-    { start: 0, end: 6, color: 'rgba(30, 27, 75, 0.03)', label: 'Night' }, // More subtle
-    { start: 6, end: 12, color: 'rgba(30, 58, 138, 0.02)', label: 'Morning' }, // More subtle
-    { start: 12, end: 18, color: 'rgba(124, 45, 18, 0.03)', label: 'Afternoon' }, // More subtle
-    { start: 18, end: 24, color: 'rgba(88, 28, 135, 0.03)', label: 'Evening' } // More subtle
-  ], []);
-  
-  // Find current energy level for the dot position
-  const currentEnergyLevel = useMemo(() => {
-    const currentHour = currentTimeDate.getHours();
-    const currentMinute = currentTimeDate.getMinutes();
-    const currentTotalMinutes = currentHour * 60 + currentMinute;
-    
-    // Find the two closest data points and interpolate
-    for (let i = 0; i < transformedData.length - 1; i++) {
-      const point1 = transformedData[i];
-      const point2 = transformedData[i + 1];
-      const time1Minutes = point1.time.getHours() * 60 + point1.time.getMinutes();
-      const time2Minutes = point2.time.getHours() * 60 + point2.time.getMinutes();
-      
-      if (currentTotalMinutes >= time1Minutes && currentTotalMinutes <= time2Minutes) {
-        const ratio = (currentTotalMinutes - time1Minutes) / (time2Minutes - time1Minutes);
-        return point1.energyLevel + (point2.energyLevel - point1.energyLevel) * ratio;
-      }
-    }
-    return 0.9; // Default for 10am
-  }, [currentTimeDate, transformedData]);
-   
+  const gradientDef = createEnergyGradient();
+  const glowFilter = createGlowFilter();
+
   return (
     <div className={`bg-gray-900 text-white min-h-screen ${className}`}>
       <div className="mx-auto max-w-7xl">
@@ -170,19 +78,20 @@ export const EnergyTimeline: React.FC<EnergyTimelineProps> = ({
             
             <h1 className="text-2xl font-semibold">Energy Rhythm</h1>
             
+            {/* Zoom Controls */}
             <div className="flex items-center space-x-1 bg-gray-800 rounded-lg px-2 py-1 ml-6">
               <button 
-                onClick={handleZoomOut}
+                onClick={interactions.handleZoomOut}
                 className="text-gray-400 hover:text-white text-lg px-2 py-0.5 rounded hover:bg-gray-700 transition-all"
                 aria-label="Zoom out"
               >
                 −
               </button>
               <span className="text-xs text-gray-500 px-2 min-w-[2.5rem] text-center">
-                {zoomLevel.toFixed(1)}x
+                {interactions.zoomLevel.toFixed(1)}x
               </span>
               <button 
-                onClick={handleZoomIn}
+                onClick={interactions.handleZoomIn}
                 className="text-gray-400 hover:text-white text-lg px-2 py-0.5 rounded hover:bg-gray-700 transition-all"
                 aria-label="Zoom in"
               >
@@ -192,33 +101,35 @@ export const EnergyTimeline: React.FC<EnergyTimelineProps> = ({
           </div>
           
           <div className="flex items-center space-x-3">
+            {/* Date Selector */}
             <div className="relative">
               <button 
-                onClick={() => setShowCalendar(!showCalendar)}
+                onClick={() => interactions.setShowCalendar(!interactions.showCalendar)}
                 className="flex items-center space-x-2 bg-gray-800 text-white px-3 py-1.5 rounded-lg hover:bg-gray-700 transition-colors text-sm"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
                     d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                 </svg>
-                <span>{selectedDate.toLocaleDateString()}</span>
+                <span>{interactions.selectedDate.toLocaleDateString()}</span>
                 <svg className="w-3 h-3 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                 </svg>
               </button>
               
-              {showCalendar && (
-                <div className="absolute top-full mt-2 right-0 bg-gray-800 rounded-lg p-3 shadow-xl z-50 min-w-[240px] border border-gray-700">
+              {/* Calendar Dropdown */}
+              {interactions.showCalendar && (
+                <div className="absolute top-full mt-2 right-0 bg-gray-800 rounded-lg p-3 shadow-xl z-timeline-calendar min-w-[240px] border border-gray-700">
                   <input
                     type="date"
-                    value={selectedDate.toISOString().split('T')[0]}
-                    onChange={(e) => handleDateChange(new Date(e.target.value))}
+                    value={interactions.selectedDate.toISOString().split('T')[0]}
+                    onChange={(e) => interactions.handleDateChange(new Date(e.target.value))}
                     className="w-full bg-gray-700 text-white px-3 py-2 rounded border border-gray-600 
                              focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none text-sm"
                   />
                   <div className="mt-2 flex space-x-2">
                     <button 
-                      onClick={() => handleDateChange(new Date())}
+                      onClick={() => interactions.handleDateChange(new Date())}
                       className="flex-1 bg-blue-600 text-white px-3 py-1.5 rounded text-xs font-medium
                                hover:bg-blue-700 transition-colors"
                     >
@@ -228,7 +139,7 @@ export const EnergyTimeline: React.FC<EnergyTimelineProps> = ({
                       onClick={() => {
                         const yesterday = new Date();
                         yesterday.setDate(yesterday.getDate() - 1);
-                        handleDateChange(yesterday);
+                        interactions.handleDateChange(yesterday);
                       }}
                       className="flex-1 bg-gray-700 text-white px-3 py-1.5 rounded text-xs font-medium
                                hover:bg-gray-600 transition-colors"
@@ -240,6 +151,7 @@ export const EnergyTimeline: React.FC<EnergyTimelineProps> = ({
               )}
             </div>
             
+            {/* Schedule Button */}
             <button className="bg-gray-800 text-white px-4 py-1.5 rounded-full flex items-center 
                              space-x-2 text-sm hover:bg-gray-700 transition-colors border border-gray-700">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -256,30 +168,25 @@ export const EnergyTimeline: React.FC<EnergyTimelineProps> = ({
           <div 
             className="w-full overflow-y-auto overflow-x-hidden relative"
             style={{ 
-              height: `calc(100vh - 80px)`,
-              minHeight: `600px`
+              height: 'calc(100vh - 80px)',
+              minHeight: '600px'
             }}
           >
-            <div className="relative" style={{ height: `${totalHeight + margin.top + margin.bottom}px` }}>
-              {/* Background sections */}
-              {backgroundSections.map((section, index) => {
-                const startTime = new Date(currentTimeDate);
-                startTime.setHours(section.start, 0, 0, 0);
-                const endTime = new Date(currentTimeDate);
-                endTime.setHours(section.end, 0, 0, 0);
-                
-                const startY = timeScale(startTime);
-                const endY = timeScale(endTime);
-                const sectionHeight = Math.abs(endY - startY);
-                
+            <div 
+              className="relative"
+              style={{ height: `${layout.totalHeight + TIMELINE_CONSTANTS.MARGIN.TOP + TIMELINE_CONSTANTS.MARGIN.BOTTOM}px` }}
+            >
+              {/* Background Sections */}
+              {layout.backgroundSections.map((section, index) => {
+                const { startY, height } = calculateSectionDimensions(section, currentTimeDate, scales.timeScale);
                 return (
                   <div
                     key={index}
                     className="absolute w-full"
                     style={{
                       top: `${startY}px`,
-                      height: `${sectionHeight}px`,
-                      backgroundColor: section.color
+                      height: `${height}px`,
+                      backgroundColor: getBackgroundColor(index)
                     }}
                   />
                 );
@@ -287,23 +194,21 @@ export const EnergyTimeline: React.FC<EnergyTimelineProps> = ({
 
               {/* SVG Chart */}
               <svg
-                ref={svgRef}
                 width={width}
-                height={totalHeight + margin.top + margin.bottom}
-                className="absolute inset-0"
-                style={{ zIndex: 10 }}
+                height={layout.totalHeight + TIMELINE_CONSTANTS.MARGIN.TOP + TIMELINE_CONSTANTS.MARGIN.BOTTOM}
+                className="absolute inset-0 z-timeline-grid"
               >
                 <defs>
-                  {/* Gradient definition */}
-                  <linearGradient id="energyGradient" x1="0%" y1="0%" x2="0%" y2="100%">
-                    {gradientStops.map((stop, index) => (
+                  {/* Gradient Definition */}
+                  <linearGradient {...gradientDef}>
+                    {energyData.gradientStops.map((stop, index) => (
                       <stop key={index} offset={stop.offset} stopColor={stop.color} />
                     ))}
                   </linearGradient>
                   
-                  {/* Subtle glow */}
-                  <filter id="glow">
-                    <feGaussianBlur stdDeviation="2" result="coloredBlur"/>
+                  {/* Glow Filter */}
+                  <filter id={glowFilter.id}>
+                    <feGaussianBlur stdDeviation={glowFilter.stdDeviation} result="coloredBlur"/>
                     <feMerge>
                       <feMergeNode in="coloredBlur"/>
                       <feMergeNode in="SourceGraphic"/>
@@ -311,40 +216,67 @@ export const EnergyTimeline: React.FC<EnergyTimelineProps> = ({
                   </filter>
                 </defs>
                 
-                {/* Time markers and labels */}
-                {timeMarkers.map((marker, index) => {
-                  const y = timeScale(marker.time);
+                {/* Grid Lines and Time Labels */}
+                {layout.timeMarkers.map((marker, index) => {
+                  const y = scales.timeScale(marker.time);
+                  const gridStyles = getGridLineStyles(marker.isHour);
+                  const tickLength = getTickLength(marker.isHour);
+                  
+                  // Calculate energy level at this time for progression highlighting
+                  const timeHour = marker.time.getHours();
+                  const energyAtTime = energyData.transformedData.find(point => 
+                    point.time.getHours() === timeHour
+                  )?.energyLevel || 0;
+                  
+                  // Get energy-based grid color for progression
+                  const getGridColor = (energy: number) => {
+                    if (energy >= 0.6) return 'rgba(37, 110, 255, 0.1)'; // Blue for high
+                    if (energy >= 0.3) return 'rgba(220, 143, 105, 0.08)'; // Orange for medium
+                    return 'rgba(183, 20, 142, 0.06)'; // Purple for low
+                  };
                   
                   return (
                     <g key={index}>
-                      {/* Grid line - extend full width */}
+                      {/* Enhanced Grid Line with energy progression */}
                       <line
-                        x1={margin.left}
+                        x1={TIMELINE_CONSTANTS.MARGIN.LEFT}
                         y1={y}
-                        x2={width - margin.right}
+                        x2={width - TIMELINE_CONSTANTS.MARGIN.RIGHT}
                         y2={y}
-                        stroke="rgba(255, 255, 255, 0.04)"
-                        strokeWidth={marker.isHour ? 1 : 0.5}
+                        stroke={marker.isHour ? getGridColor(energyAtTime) : "rgba(255, 255, 255, 0.02)"}
+                        strokeWidth={gridStyles.strokeWidth}
                       />
                       
-                      {/* Tick mark */}
+                      {/* Energy progression highlight on left margin */}
+                      {marker.isHour && (
+                        <rect
+                          x={0}
+                          y={y - (hourHeight / 2)}
+                          width={TIMELINE_CONSTANTS.MARGIN.LEFT}
+                          height={hourHeight}
+                          fill={getGridColor(energyAtTime)}
+                          opacity={0.3}
+                        />
+                      )}
+                      
+                      {/* Tick Mark */}
                       <line
-                        x1={margin.left - (marker.isHour ? 10 : 5)}
+                        x1={TIMELINE_CONSTANTS.MARGIN.LEFT - tickLength}
                         y1={y}
-                        x2={margin.left}
+                        x2={TIMELINE_CONSTANTS.MARGIN.LEFT}
                         y2={y}
-                        stroke="rgba(255, 255, 255, 0.3)"
+                        stroke="rgba(255, 255, 255, 0.4)"
                         strokeWidth={1}
                       />
                       
-                      {/* Time label - only for hours */}
+                      {/* Time Label */}
                       {marker.label && (
                         <text
-                          x={margin.left - 15}
+                          x={TIMELINE_CONSTANTS.MARGIN.LEFT - 15}
                           y={y + 4}
-                          fill="rgba(255, 255, 255, 0.7)"
+                          fill="rgba(255, 255, 255, 0.8)"
                           fontSize="12"
-                          fontWeight="400"
+                          fontWeight="500"
                           textAnchor="end"
                           className="select-none"
                         >
@@ -355,91 +287,125 @@ export const EnergyTimeline: React.FC<EnergyTimelineProps> = ({
                   );
                 })}
                 
-                {/* Energy curve */}
+                {/* Energy Curve */}
                 <path
-                  d={pathData || ''}
+                  d={scales.pathData || ''}
                   fill="none"
                   stroke="url(#energyGradient)"
-                  strokeWidth={5}
+                  strokeWidth={TIMELINE_CONSTANTS.CURVE.STROKE_WIDTH}
                   strokeLinecap="round"
                   strokeLinejoin="round"
-                  filter="url(#glow)"
+                  filter={`url(#${glowFilter.id})`}
                 />
                 
-                {/* Current time indicator */}
+                {/* Current Time Indicator */}
                 <g>
-                  {/* Horizontal line */}
+                  {/* Horizontal Line - starts from left side */}
                   <line
-                    x1={margin.left}
-                    y1={currentTimePosition}
-                    x2={width - margin.right}
-                    y2={currentTimePosition}
+                    x1={TIMELINE_CONSTANTS.MARGIN.LEFT}
+                    y1={layout.currentTimePosition}
+                    x2={scales.energyScale(energyData.currentEnergyLevel)}
+                    y2={layout.currentTimePosition}
                     stroke="white"
-                    strokeWidth={1.5}
-                    opacity={0.8}
+                    strokeWidth={TIMELINE_CONSTANTS.CURRENT_TIME.LINE_WIDTH}
+                    opacity={TIMELINE_CONSTANTS.CURRENT_TIME.LINE_OPACITY}
                   />
                   
-                  {/* Interactive white dot */}
+                  {/* Interactive Dot */}
                   <circle
-                    cx={energyScale(currentEnergyLevel)}
-                    cy={currentTimePosition}
-                    r={8}
+                    cx={scales.energyScale(energyData.currentEnergyLevel)}
+                    cy={layout.currentTimePosition}
+                    r={TIMELINE_CONSTANTS.CURRENT_TIME.DOT_RADIUS}
                     fill="white"
-                    stroke="none"
-                    style={{ cursor: 'pointer' }}
-                    onMouseEnter={() => setShowTooltip(true)}
-                    onMouseLeave={() => setShowTooltip(false)}
-                    onClick={() => setShowTooltip(!showTooltip)}
+                    className="cursor-pointer"
+                    onMouseEnter={() => interactions.setShowTooltip(true)}
+                    onMouseLeave={() => interactions.setShowTooltip(false)}
+                    onClick={() => interactions.setShowTooltip(!interactions.showTooltip)}
                   />
                 </g>
               </svg>
-            
-              {/* Highlight labels */}
-              <div className="absolute z-30" style={{ 
-                right: `20px`, 
-                top: `${margin.top}px`,
-                width: '160px',
-                height: `${totalHeight}px` 
-              }}>
+
+              {/* Highlight Labels */}
+              <div 
+                className="absolute z-timeline-highlights right-5"
+                style={{ 
+                  top: `${TIMELINE_CONSTANTS.MARGIN.TOP}px`,
+                  width: '160px',
+                  height: `${layout.totalHeight}px` 
+                }}
+              >
                 {highlights.map((highlight, index) => {
                   const highlightTime = new Date(highlight.time);
-                  highlightTime.setFullYear(
-                    selectedDate.getFullYear(),
-                    selectedDate.getMonth(),
-                    selectedDate.getDate()
+                  const labelY = calculateHighlightPosition(
+                    highlightTime, 
+                    interactions.selectedDate, 
+                    scales.timeScale, 
+                    TIMELINE_CONSTANTS.MARGIN.TOP
                   );
-                  const labelY = timeScale(highlightTime) - margin.top;
+                  
+                  // Get appropriate icon for each label
+                  const getIcon = (label: string) => {
+                    if (label.includes('Morning Rise') || label.includes('Wake up')) {
+                      return (
+                        <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+                          <path d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+                        </svg>
+                      );
+                    }
+                    if (label.includes('Peak') || label.includes('Rebound')) {
+                      return (
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
+                            d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+                        </svg>
+                      );
+                    }
+                    if (label.includes('Dip') || label.includes('Wind Down')) {
+                      return (
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
+                            d="M13 17h8m0 0V9m0 8l-8-8-4 4-6-6" />
+                        </svg>
+                      );
+                    }
+                    if (label.includes('Sleep') || label.includes('Bedtime')) {
+                      return (
+                        <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+                          <path d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+                        </svg>
+                      );
+                    }
+                    return null;
+                  };
                   
                   return (
                     <div
                       key={index}
                       className="absolute"
-                      style={{ 
-                        top: `${labelY - 14}px`,
-                        right: '0px'
-                      }}
+                      style={{ top: `${labelY - 14}px`, right: '0px' }}
                     >
                       <div 
-                        className="px-3 py-1.5 rounded-full text-xs font-medium text-white shadow-sm"
+                        className="px-3 py-1.5 rounded-full text-xs font-medium text-white shadow-sm flex items-center space-x-1"
                         style={{ 
-                          backgroundColor: highlight.color, // Use exact color from highlights data
+                          backgroundColor: highlight.color,
                           fontSize: '11px'
                         }}
                       >
-                        {highlight.label}
+                        {getIcon(highlight.label)}
+                        <span>{highlight.label}</span>
                       </div>
                     </div>
                   );
                 })}
               </div>
 
-              {/* Custom message tooltip - only show on hover/click */}
-              {customMessage && showTooltip && (
+              {/* Tooltip */}
+              {customMessage && interactions.showTooltip && (
                 <div 
-                  className="absolute z-40 bg-white rounded-lg shadow-md p-2.5 max-w-[220px]"
+                  className="absolute z-timeline-tooltip bg-white rounded-lg shadow-md p-2.5 max-w-[220px]"
                   style={{
-                    left: `${energyScale(currentEnergyLevel) + 20}px`,
-                    top: `${currentTimePosition - 45}px`
+                    left: `${scales.energyScale(energyData.currentEnergyLevel) + TIMELINE_CONSTANTS.TOOLTIP.OFFSET}px`,
+                    top: `${layout.currentTimePosition - TIMELINE_CONSTANTS.TOOLTIP.VERTICAL_OFFSET}px`
                   }}
                 >
                   <div className="text-gray-900">
@@ -450,7 +416,7 @@ export const EnergyTimeline: React.FC<EnergyTimelineProps> = ({
                       {customMessage.description}
                     </p>
                   </div>
-                  {/* Subtle arrow pointing to the dot */}
+                  {/* Arrow */}
                   <div className="absolute left-0 top-1/2 transform -translate-x-1.5 -translate-y-1/2">
                     <div className="w-0 h-0 border-t-[5px] border-b-[5px] border-r-[8px] 
                                   border-t-transparent border-b-transparent border-r-white"></div>
