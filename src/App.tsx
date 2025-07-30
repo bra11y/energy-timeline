@@ -3,14 +3,13 @@ import { energyData, highlights, currentTime, customMessage } from './data/sampl
 
 function App() {
   return (
-    <div className="min-h-screen bg-gray-900 w-full mx-auto">
+    <div className="min-h-screen bg-gray-900 ">
       <EnergyTimeline
         data={energyData}
         highlights={highlights}
         currentTime={currentTime}
         customMessage={customMessage}
         hourHeight={40}
-        className="desktop-energy-timeline"
       />
     </div>
   );
