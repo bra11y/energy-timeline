@@ -1,8 +1,10 @@
 import type { EnergyPoint, EnergyHighlight, TimelineMessage } from '../types/energy';
 
+// Get today's date for sample data (matching the provided format exactly)
 const today = new Date();
-const todayISO = today.toISOString().split('T')[0];
+const todayISO = today.toISOString().split('T')[0]; // YYYY-MM-DD
 
+// Sample data representing energy levels throughout the day
 export const energyData: EnergyPoint[] = [
   { id: 0, time: `${todayISO}T00:00:00Z`, level: 0.05 },
   { id: 1, time: `${todayISO}T01:00:00Z`, level: 0.05 },
@@ -31,6 +33,7 @@ export const energyData: EnergyPoint[] = [
   { id: 24, time: `${new Date(new Date().setDate(today.getDate() + 1)).toISOString().split('T')[0]}T00:00:00Z`, level: 0.1 },
 ];
 
+// Energy highlights/markers matching mobile design exactly
 export const highlights: EnergyHighlight[] = [
   { time: `${todayISO}T00:00:00Z`, label: 'Bedtime', color: '#4a4a85' },
   { time: `${todayISO}T05:00:00Z`, label: 'Early Morning', color: '#7d6bb3' },
@@ -42,9 +45,9 @@ export const highlights: EnergyHighlight[] = [
   { time: `${todayISO}T21:00:00Z`, label: 'Bedtime', color: '#4a4a85' },
 ];
 
+// Current time and message
 export const currentTime = `${todayISO}T10:00:00Z`;
-
 export const customMessage: TimelineMessage = {
   title: 'Your energy level is high right now as you are in your morning peak.',
   description: 'We recommend you try a task or some other copy that makes more sense.'
-}; 
+};

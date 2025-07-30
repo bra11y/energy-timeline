@@ -1,7 +1,8 @@
+// Provided sample data structure
 export interface EnergyPoint {
   id: number;
-  time: string;
-  level: number;
+  time: string; // ISO string format
+  level: number; // 0-1 scale
 }
 
 export interface EnergyHighlight {
@@ -15,6 +16,7 @@ export interface TimelineMessage {
   description: string;
 }
 
+// Internal data structure after transformation
 export interface EnergyDataPoint {
   time: Date;
   energyLevel: number;
@@ -28,4 +30,12 @@ export interface EnergyTimelineProps {
   hourHeight?: number;
   width?: number;
   className?: string;
-} 
+}
+
+export type EnergyLevel = 'high' | 'medium' | 'low';
+
+export const ENERGY_COLORS = {
+  high: '#256EFF',
+  medium: '#DC8F69', 
+  low: '#B7148E'
+} as const;
